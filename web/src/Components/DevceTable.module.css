@@ -1,0 +1,17 @@
+@keyframes refresh {
+    0% {
+        color: red;
+    }
+
+    100% {
+        color: "inherit";
+    }
+}
+
+.RefreshCell {
+    animation: "refresh 3000ms";
+}
+
+.TableHeader {
+    background-color: lightblue;
+}
