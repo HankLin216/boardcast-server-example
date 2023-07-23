@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using boardcast_server_example.Models;
 using boardcast_server_example.Hubs;
 using Microsoft.AspNetCore.SignalR;
-
+using boardcast_server_example.DataBase;
 namespace boardcast_server_example.Controllers;
 
 [ApiController]
@@ -10,53 +10,27 @@ namespace boardcast_server_example.Controllers;
 public class DeviceController : ControllerBase
 {
     private readonly IHubContext<DeviceHub> _deviceHubContext;
-    private static Dictionary<string, Device> _deviceByID = new Dictionary<string, Device>(){
-        {"1", new Device
-        {
-            ID = "1",
-            Name = "nvme1n1",
-            Type = "PCIe",
-            Status = "idle",
-            Update_Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-            Create_Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-        }},
-        {"2", new Device
-        {
-            ID = "2",
-            Name = "nvme2n1",
-            Type = "PCIe",
-            Status = "idle",
-            Update_Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-            Create_Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-        }},
-        {"3", new Device
-        {
-            ID = "3",
-            Name = "nvme3n1",
-            Type = "PCIe",
-            Status = "idle",
-            Update_Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-            Create_Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-        }}
-    };
+    private readonly DbHelper _db;
 
-    public DeviceController(IHubContext<DeviceHub> hubContext)
+    public DeviceController(IHubContext<DeviceHub> hubContext, EF_DataContext context)
     {
         _deviceHubContext = hubContext;
+        _db = new DbHelper(context);
     }
 
     [HttpGet]
     public IActionResult Get()
     {
-        return Ok(_deviceByID.Values.ToArray());
+        return Ok(_db.List());
     }
 
     [HttpGet("{id}")]
-    public IActionResult Get(string id)
+    public IActionResult Get(int id)
     {
-        if (_deviceByID.TryGetValue(id, out Device? _dev))
+        var d = _db.Get(id);
+        if (d != null)
         {
-            return Ok(_dev);
+            return Ok(d);
         }
         else
         {
@@ -65,55 +39,43 @@ public class DeviceController : ControllerBase
     }
 
     [HttpPost]
-    public IActionResult Create(Device dev)
+    public IActionResult Create(DeviceModel d)
     {
-        if (string.IsNullOrEmpty(dev.ID))
-        {
-            return BadRequest();
-        }
-
-        if (_deviceByID.TryGetValue(dev.ID, out Device? _dev))
-        {
-            return Conflict();
-        }
-        else
-        {
-            dev.Status = "Idle";
-            dev.Create_Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            dev.Update_Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            _deviceByID.Add(dev.ID, dev);
-            return Ok(dev.ID);
-        }
+        return Ok(_db.SaveOrUpdate(d));
     }
 
     [HttpPatch("{id}")]
-    public async Task<IActionResult> Patch(string id, Device dev)
+    public async Task<IActionResult> Patch(int id, DeviceModel d)
     {
-        if (!_deviceByID.ContainsKey(id))
+        d.ID = id;
+        bool updateSuccess = _db.SaveOrUpdate(d);
+        if (updateSuccess)
         {
-            return NotFound();
+            var updateRes = Get(id);
+            if (updateRes is OkObjectResult ok)
+            {
+                DeviceModel? ud = (DeviceModel?)ok.Value;
+                if (ud != null)
+                {
+                    await _deviceHubContext.Clients.All.SendAsync("UpdateDevice", ud);
+                }
+                else
+                {
+                    return StatusCode(500, "SignalR update failed");
+                }
+            }
+            else
+            {
+                return StatusCode(500, "Get update device failed");
+            }
         }
 
-        _deviceByID[id].Name = dev.Name;
-        _deviceByID[id].Type = dev.Type;
-        _deviceByID[id].Status = dev.Status;
-        _deviceByID[id].Update_Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-
-        await _deviceHubContext.Clients.All.SendAsync("UpdateDevice", _deviceByID[id]);
-
-        return Ok(_deviceByID[id]);
+        return updateSuccess ? Ok() : StatusCode(500, "Update failed");
     }
 
     [HttpDelete("{id}")]
-    public IActionResult Delete(string id)
+    public IActionResult Delete(int id)
     {
-        if (!_deviceByID.ContainsKey(id))
-        {
-            return NotFound();
-        }
-
-        _deviceByID.Remove(id);
-
-        return Ok(id);
+        return Ok(_db.Delete(id));
     }
 }
